@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Map with A* Pathfinding</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 75vh;
+        }
+        .controls {
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+        }
+        .btn {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .btn:hover {
+            background-color: #45a049;
+        }
+        .info {
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .address-inputs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .input-group {
+            flex: 1;
+            min-width: 250px;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .autocomplete-results {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            z-index: 1000;
+            max-height: 200px;
+            overflow-y: auto;
+            width: calc(100% - 2px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: none;
+        }
+        .autocomplete-item {
+            padding: 8px;
+            cursor: pointer;
+        }
+        .autocomplete-item:hover {
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <div class="address-inputs">
+            <div class="input-group">
+                <input type="text" id="start-address" placeholder="Enter start location">
+                <div id="start-autocomplete" class="autocomplete-results"></div>
+            </div>
+            <div class="input-group">
+                <input type="text" id="end-address" placeholder="Enter destination">
+                <div id="end-autocomplete" class="autocomplete-results"></div>
+            </div>
+            <button id="calculate" class="btn" disabled>Calculate Path</button>
+            <button id="reset" class="btn">Reset</button>
+        </div>
+        <div class="info">
+            <p id="instructions">Enter start and destination addresses.</p>
+            <p id="path-info"></p>
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([-26.3045, -48.8487], 13);
+        
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        
+        // Variables to store markers and path
+        let startMarker = null;
+        let endMarker = null;
+        let pathLine = null;
+        const calculateBtn = document.getElementById('calculate');
+        const resetBtn = document.getElementById('reset');
+        const instructions = document.getElementById('instructions');
+        const pathInfo = document.getElementById('path-info');
+        const startAddressInput = document.getElementById('start-address');
+        const endAddressInput = document.getElementById('end-address');
+        const startAutocomplete = document.getElementById('start-autocomplete');
+        const endAutocomplete = document.getElementById('end-autocomplete');
+        
+        // Event listeners
+        resetBtn.addEventListener('click', resetMap);
+        calculateBtn.addEventListener('click', findPath);
+        startAddressInput.addEventListener('input', debounce(event => searchAddress(event.target.value, startAutocomplete, 'start'), 500));
+        endAddressInput.addEventListener('input', debounce(event => searchAddress(event.target.value, endAutocomplete, 'end'), 500));
+        
+        // Debounce function to limit API calls
+        function debounce(func, delay) {
+            let timeout;
+            return function() {
+                const context = this;
+                const args = arguments;
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(context, args), delay);
+            };
+        }
+        
+        // Search address using Nominatim
+        function searchAddress(query, autocompleteElement, type) {
+            if (query.length < 3) {
+                autocompleteElement.style.display = 'none';
+                return;
+            }
+            
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    autocompleteElement.innerHTML = '';
+                    
+                    if (data.length === 0) {
+                        autocompleteElement.style.display = 'none';
+                        return;
+                    }
+                    
+                    data.forEach(result => {
+                        const item = document.createElement('div');
+                        item.className = 'autocomplete-item';
+                        item.textContent = result.display_name;
+                        item.addEventListener('click', () => {
+                            const input = type === 'start' ? startAddressInput : endAddressInput;
+                            input.value = result.display_name;
+                            
+                            const latlng = { lat: parseFloat(result.lat), lng: parseFloat(result.lon) };
+                            
+                            if (type === 'start') {
+                                setStartMarker(latlng);
+                            } else {
+                                setEndMarker(latlng);
+                            }
+                            
+                            autocompleteElement.style.display = 'none';
+                            updateCalculateButton();
+                        });
+                        
+                        autocompleteElement.appendChild(item);
+                    });
+                    
+                    autocompleteElement.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error searching address:', error);
+                    autocompleteElement.style.display = 'none';
+                });
+        }
+        
+        // Set start marker
+        function setStartMarker(latlng) {
+            if (startMarker) {
+                map.removeLayer(startMarker);
+            }
+            
+            startMarker = L.marker(latlng, { draggable: true }).addTo(map);
+            startMarker.bindPopup("Start").openPopup();
+            
+            startMarker.on('dragend', function() {
+                const newPos = startMarker.getLatLng();
+                reverseGeocode(newPos, startAddressInput);
+            });
+            
+            map.setView(latlng, 13);
+            instructions.textContent = "Enter destination address.";
+        }
+        
+        // Set end marker
+        function setEndMarker(latlng) {
+            if (endMarker) {
+                map.removeLayer(endMarker);
+            }
+            
+            endMarker = L.marker(latlng, { draggable: true }).addTo(map);
+            endMarker.bindPopup("Destination").openPopup();
+            
+            endMarker.on('dragend', function() {
+                const newPos = endMarker.getLatLng();
+                reverseGeocode(newPos, endAddressInput);
+            });
+            
+            // Fit both markers in view
+            if (startMarker) {
+                const bounds = L.latLngBounds(startMarker.getLatLng(), endMarker.getLatLng());
+                map.fitBounds(bounds, { padding: [50, 50] });
+            } else {
+                map.setView(latlng, 13);
+            }
+            
+            instructions.textContent = "Click 'Calculate Path' to find the shortest route.";
+        }
+        
+        // Reverse geocode to get address from coordinates
+        function reverseGeocode(latlng, inputElement) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.display_name) {
+                        inputElement.value = data.display_name;
+                    }
+                    updateCalculateButton();
+                })
+                .catch(error => {
+                    console.error('Error in reverse geocoding:', error);
+                });
+        }
+        
+        // Update calculate button state
+        function updateCalculateButton() {
+            calculateBtn.disabled = !(startMarker && endMarker);
+        }
+        
+        // Reset the map
+        function resetMap() {
+            if (startMarker) {
+                map.removeLayer(startMarker);
+                startMarker = null;
+            }
+            if (endMarker) {
+                map.removeLayer(endMarker);
+                endMarker = null;
+            }
+            if (pathLine) {
+                map.removeLayer(pathLine);
+                pathLine = null;
+            }
+            
+            startAddressInput.value = '';
+            endAddressInput.value = '';
+            calculateBtn.disabled = true;
+            instructions.textContent = "Enter start and destination addresses.";
+            pathInfo.textContent = "";
+            
+            // Reset view to Joinville
+            map.setView([-26.3045, -48.8487], 13);
+        }
+        
+        // Find and display road-based path using OSRM
+        function findPath() {
+            if (!startMarker || !endMarker) return;
+            
+            // Clear previous path
+            if (pathLine) {
+                map.removeLayer(pathLine);
+            }
+            
+            // Show loading message
+            pathInfo.textContent = "Calculating route...";
+            
+            const start = startMarker.getLatLng();
+            const end = endMarker.getLatLng();
+            
+            // Format coordinates for OSRM (OSRM wants lng,lat format)
+            const startCoord = `${start.lng},${start.lat}`;
+            const endCoord = `${end.lng},${end.lat}`;
+            
+            // Use OSRM public API to get road-based directions
+            const url = `https://router.project-osrm.org/route/v1/driving/${startCoord};${endCoord}?overview=full&geometries=geojson`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+                        pathInfo.textContent = "Could not find a route between these points.";
+                        return;
+                    }
+                    
+                    const route = data.routes[0];
+                    const coordinates = route.geometry.coordinates;
+                    
+                    // OSRM returns coordinates as [longitude, latitude], but Leaflet wants [latitude, longitude]
+                    const latLngs = coordinates.map(coord => L.latLng(coord[1], coord[0]));
+                    
+                    // Display the path
+                    pathLine = L.polyline(latLngs, {
+                        color: 'blue',
+                        weight: 5,
+                        opacity: 0.7
+                    }).addTo(map);
+                    
+                    // Fit the map to show the whole path
+                    const bounds = pathLine.getBounds();
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                    
+                    // Calculate distance and duration
+                    const distance = route.distance; // meters
+                    const duration = route.duration; // seconds
+                    
+                    // Format duration
+                    let durationText = '';
+                    if (duration >= 3600) {
+                        const hours = Math.floor(duration / 3600);
+                        const minutes = Math.floor((duration % 3600) / 60);
+                        durationText = `${hours} hr ${minutes} min`;
+                    } else {
+                        const minutes = Math.floor(duration / 60);
+                        durationText = `${minutes} min`;
+                    }
+                    
+                    // Update info
+                    pathInfo.textContent = `Route found! Distance: ${(distance/1000).toFixed(2)} km, Duration: ${durationText}`;
+                })
+                .catch(error => {
+                    console.error('Error finding route:', error);
+                    pathInfo.textContent = "Error calculating route. Please try again.";
+                });
+        }
+    </script>
+</body>
+</html>
