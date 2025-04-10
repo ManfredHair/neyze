@@ -3,106 +3,503 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS Map with A* Pathfinding</title>
+    <title>Waze-style Navigation</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        :root {
+            --waze-blue: #33ccff;
+            --waze-mint: #33cc99;
+            --waze-red: #ff0000;
+            --waze-orange: #ff9966;
+            --waze-gray: #f5f5f5;
+            --waze-dark: #333333;
+        }
+        
+        * {
+            box-sizing: border-box;
+            font-family: 'Arial Rounded MT Bold', 'Arial', sans-serif;
+        }
+        
         body {
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
+            background-color: var(--waze-gray);
+            color: var(--waze-dark);
+            overflow: hidden; /* Prevent scrolling */
+            height: 100vh;
         }
+        
         #map {
             width: 100%;
-            height: 75vh;
+            height: 100%;
+            z-index: 1;
+            position: absolute;
+            top: 0;
+            left: 0;
         }
-        .controls {
-            padding: 15px;
-            background-color: #f5f5f5;
-            border-bottom: 1px solid #ddd;
+        
+        .app-container {
+            max-width: 100%;
+            margin: 0;
+            position: relative;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
-        .btn {
-            padding: 8px 15px;
-            background-color: #4CAF50;
+        
+        .app-content {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        
+        .app-header {
+            background: linear-gradient(to right, var(--waze-blue), var(--waze-mint));
             color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-right: 10px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 100;
+            flex-shrink: 0;
         }
-        .btn:hover {
-            background-color: #45a049;
+        
+        .app-logo {
+            display: flex;
+            align-items: center;
+            font-size: 24px;
+            font-weight: bold;
         }
-        .info {
-            margin-top: 10px;
-            font-size: 14px;
+        
+        .app-logo i {
+            margin-right: 8px;
+            font-size: 28px;
         }
+        
+        .ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            padding-top: 12px;
+        }
+        
+        .ui-container > * {
+            pointer-events: auto;
+        }
+        
+        .controls-container {
+            margin: 12px 0 0 16px;
+            width: 320px;
+            max-width: 90%;
+            align-self: flex-start;
+        }
+        
+        .route-container {
+            margin: auto 0 16px 16px;
+            width: 320px;
+            max-width: 90%;
+            align-self: flex-start;
+        }
+        
+        .controls {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 12px;
+            position: relative;
+            z-index: 100;
+            max-height: 40vh;
+            overflow: auto;
+        }
+        
         .address-inputs {
             display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 15px;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
         }
+        
         .input-group {
-            flex: 1;
-            min-width: 250px;
+            display: flex;
+            align-items: center;
+            border: 1px solid #eee;
+            border-radius: 24px;
+            padding: 4px 12px;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            position: relative;
         }
+        
+        .input-group i {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+        
+        .input-group i.start-icon {
+            color: var(--waze-mint);
+        }
+        
+        .input-group i.destination-icon {
+            color: var(--waze-red);
+        }
+        
         .input-group input {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            flex: 1;
+            border: none;
+            padding: 8px 4px;
+            font-size: 14px;
+            outline: none;
+            background: transparent;
         }
+        
+        .btn-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        
+        .btn {
+            padding: 8px;
+            border: none;
+            border-radius: 24px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        
+        .btn i {
+            margin-right: 8px;
+        }
+        
+        .btn-primary {
+            background-color: var(--waze-blue);
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background-color: #29b1e6;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background-color: var(--waze-gray);
+            color: var(--waze-dark);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #e6e6e6;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .info {
+            margin-top: 16px;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        #path-info {
+            font-weight: bold;
+            color: var(--waze-blue);
+            font-size: 16px;
+            margin-top: 8px;
+        }
+        
         .autocomplete-results {
             position: absolute;
             background-color: white;
-            border: 1px solid #ddd;
-            border-top: none;
+            border-radius: 12px;
+            top: 100%;
+            left: 0;
+            right: 0;
             z-index: 1000;
             max-height: 200px;
             overflow-y: auto;
-            width: calc(100% - 2px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin-top: 4px;
             display: none;
         }
+        
         .autocomplete-item {
-            padding: 8px;
+            padding: 12px 16px;
             cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
         }
+        
         .autocomplete-item:hover {
-            background-color: #f5f5f5;
+            background-color: #f9f9f9;
+        }
+        
+        .result-main {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 4px;
+            color: var(--waze-dark);
+        }
+        
+        .result-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #777;
+        }
+        
+        .result-address {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 85%;
+        }
+        
+        .result-distance {
+            color: var(--waze-blue);
+            font-weight: bold;
+            white-space: nowrap;
+            margin-left: 8px;
+        }
+        
+        .route-info-card {
+            display: none;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 16px;
+            animation: slideUp 0.3s ease;
+            z-index: 100;
+            position: relative;
+        }
+        
+        .route-info-card.active {
+            display: block;
+        }
+        
+        .route-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .route-title {
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        .route-details {
+            display: flex;
+            gap: 16px;
+        }
+        
+        .route-detail {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .detail-value {
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        .detail-label {
+            font-size: 12px;
+            color: #777;
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Customize Leaflet controls */
+        .leaflet-control-zoom {
+            border-radius: 12px !important;
+            overflow: hidden;
+        }
+        
+        .leaflet-control-zoom a {
+            background-color: white !important;
+            color: var(--waze-dark) !important;
+        }
+        
+        .leaflet-bottom.leaflet-right {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .zoom-control-wrapper {
+            order: 1;
+            margin-bottom: 10px;
+        }
+        
+        .attribution-wrapper {
+            order: 2;
+        }
+        
+        /* Animated route line */
+        @keyframes dashdraw {
+            from {
+                stroke-dashoffset: 1000;
+            }
+            to {
+                stroke-dashoffset: 0;
+            }
+        }
+        
+        .animated-route {
+            stroke-dasharray: 10, 5;
+            animation: dashdraw 3s linear forwards;
         }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <div class="address-inputs">
-            <div class="input-group">
-                <input type="text" id="start-address" placeholder="Enter start location">
-                <div id="start-autocomplete" class="autocomplete-results"></div>
+    <div class="app-container">
+        <div class="app-header">
+            <div class="app-logo">
+                <i class="fas fa-location-arrow"></i>
+                <span>WazeClone</span>
             </div>
-            <div class="input-group">
-                <input type="text" id="end-address" placeholder="Enter destination">
-                <div id="end-autocomplete" class="autocomplete-results"></div>
-            </div>
-            <button id="calculate" class="btn" disabled>Calculate Path</button>
-            <button id="reset" class="btn">Reset</button>
         </div>
-        <div class="info">
-            <p id="instructions">Enter start and destination addresses.</p>
-            <p id="path-info"></p>
+        
+        <div class="app-content">
+            <div id="map"></div>
+            
+            <div class="ui-container">
+                <div class="controls-container">
+                    <div class="controls">
+                        <div class="address-inputs">
+                            <div class="input-group">
+                                <i class="fas fa-circle start-icon"></i>
+                                <input type="text" id="start-address" placeholder="Choose starting point">
+                                <div id="start-autocomplete" class="autocomplete-results"></div>
+                            </div>
+                            <div class="input-group">
+                                <i class="fas fa-map-marker-alt destination-icon"></i>
+                                <input type="text" id="end-address" placeholder="Choose destination">
+                                <div id="end-autocomplete" class="autocomplete-results"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="btn-container">
+                            <button id="calculate" class="btn btn-primary" disabled>
+                                <i class="fas fa-route"></i>
+                                Find Route
+                            </button>
+                            <button id="reset" class="btn btn-secondary">
+                                <i class="fas fa-redo"></i>
+                                Reset
+                            </button>
+                        </div>
+                        
+                        <div class="info">
+                            <p id="instructions">Enter start and destination addresses</p>
+                            <p id="path-info"></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="route-container">
+                    <div id="route-info" class="route-info-card">
+                        <div class="route-header">
+                            <div class="route-title">Best Route</div>
+                            <div class="route-eta">ETA: <span id="eta-time">--:--</span></div>
+                        </div>
+                        <div class="route-details">
+                            <div class="route-detail">
+                                <div class="detail-value" id="route-distance">-.- km</div>
+                                <div class="detail-label">Distance</div>
+                            </div>
+                            <div class="route-detail">
+                                <div class="detail-value" id="route-duration">-- min</div>
+                                <div class="detail-label">Duration</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-    <div id="map"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script>
         // Initialize map
-        const map = L.map('map').setView([-26.3045, -48.8487], 13);
+        const map = L.map('map', {
+            zoomControl: false,  // Disable default zoom control to reposition it
+            attributionControl: false
+        }).setView([-26.3045, -48.8487], 13);
         
-        // Add OpenStreetMap tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        // Custom map style - more colorful like Waze
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
         }).addTo(map);
+        
+        // Create custom control wrappers for better positioning
+        const attributionWrapper = L.Control.extend({
+            options: { position: 'bottomright' },
+            onAdd: function() {
+                const div = L.DomUtil.create('div', 'attribution-wrapper');
+                return div;
+            }
+        });
+        
+        const zoomWrapper = L.Control.extend({
+            options: { position: 'bottomright' },
+            onAdd: function() {
+                const div = L.DomUtil.create('div', 'zoom-control-wrapper');
+                return div;
+            }
+        });
+        
+        // Add wrappers to map
+        const attrWrap = new attributionWrapper().addTo(map);
+        const zoomWrap = new zoomWrapper().addTo(map);
+        
+        // Add controls to wrappers
+        const zoomControl = L.control.zoom({
+            position: 'bottomright'
+        });
+        
+        const attributionControl = L.control.attribution({
+            position: 'bottomright'
+        }).addAttribution('© OpenStreetMap | OSRM | WazeClone');
+        
+        // Add controls to map with proper DOM manipulation
+        zoomControl._map = map;
+        zoomControl._container = null;
+        map._controlCorners['bottomright'].appendChild(zoomWrap.getContainer());
+        zoomControl._initLayout();
+        zoomWrap.getContainer().appendChild(zoomControl.getContainer());
+        
+        attributionControl._map = map;
+        attributionControl._container = null;
+        map._controlCorners['bottomright'].appendChild(attrWrap.getContainer());
+        attributionControl._initLayout();
+        attrWrap.getContainer().appendChild(attributionControl.getContainer());
         
         // Variables to store markers and path
         let startMarker = null;
@@ -116,12 +513,41 @@
         const endAddressInput = document.getElementById('end-address');
         const startAutocomplete = document.getElementById('start-autocomplete');
         const endAutocomplete = document.getElementById('end-autocomplete');
+        const routeInfoCard = document.getElementById('route-info');
+        const routeDistance = document.getElementById('route-distance');
+        const routeDuration = document.getElementById('route-duration');
+        const etaTime = document.getElementById('eta-time');
+        
+        // Custom marker icons
+        const startIcon = L.divIcon({
+            html: '<i class="fas fa-circle" style="color: #33cc99; font-size: 18px;"></i>',
+            className: 'custom-div-icon',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+        
+        const endIcon = L.divIcon({
+            html: '<i class="fas fa-map-marker-alt" style="color: #ff0000; font-size: 24px;"></i>',
+            className: 'custom-div-icon',
+            iconSize: [30, 30],
+            iconAnchor: [15, 30]
+        });
         
         // Event listeners
         resetBtn.addEventListener('click', resetMap);
         calculateBtn.addEventListener('click', findPath);
         startAddressInput.addEventListener('input', debounce(event => searchAddress(event.target.value, startAutocomplete, 'start'), 500));
         endAddressInput.addEventListener('input', debounce(event => searchAddress(event.target.value, endAutocomplete, 'end'), 500));
+        
+        // Hide autocomplete when clicking elsewhere
+        document.addEventListener('click', function(event) {
+            if (!startAutocomplete.contains(event.target) && event.target !== startAddressInput) {
+                startAutocomplete.style.display = 'none';
+            }
+            if (!endAutocomplete.contains(event.target) && event.target !== endAddressInput) {
+                endAutocomplete.style.display = 'none';
+            }
+        });
         
         // Debounce function to limit API calls
         function debounce(func, delay) {
@@ -141,7 +567,20 @@
                 return;
             }
             
-            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
+            // Get current map bounds for location biasing
+            const mapBounds = map.getBounds();
+            const viewBox = [
+                mapBounds.getWest(), // min longitude
+                mapBounds.getSouth(), // min latitude
+                mapBounds.getEast(), // max longitude
+                mapBounds.getNorth()  // max latitude
+            ].join(',');
+            
+            // Get map center for distance calculation
+            const mapCenter = map.getCenter();
+            
+            // Add viewbox and countrycodes parameters to bias results toward current view
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10&viewbox=${viewBox}&bounded=0&countrycodes=br`;
             
             fetch(url)
                 .then(response => response.json())
@@ -153,10 +592,47 @@
                         return;
                     }
                     
+                    // Calculate distance from map center for each result
                     data.forEach(result => {
+                        const lat = parseFloat(result.lat);
+                        const lon = parseFloat(result.lon);
+                        
+                        // Calculate distance using Haversine formula
+                        const R = 6371; // Radius of earth in km
+                        const dLat = (lat - mapCenter.lat) * Math.PI / 180;
+                        const dLon = (lon - mapCenter.lng) * Math.PI / 180;
+                        const a = 
+                            Math.sin(dLat/2) * Math.sin(dLat/2) +
+                            Math.cos(mapCenter.lat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) * 
+                            Math.sin(dLon/2) * Math.sin(dLon/2);
+                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                        const distance = R * c; // Distance in km
+                        
+                        result.distance = distance;
+                    });
+                    
+                    // Sort results by distance from map center
+                    data.sort((a, b) => a.distance - b.distance);
+                    
+                    // Display only the top 5 results
+                    data.slice(0, 5).forEach(result => {
                         const item = document.createElement('div');
                         item.className = 'autocomplete-item';
-                        item.textContent = result.display_name;
+                        
+                        // Create a more structured display for the result
+                        const resultName = result.name || result.display_name.split(',')[0];
+                        const distanceText = result.distance < 1 ? 
+                            `${Math.round(result.distance * 1000)} m` : 
+                            `${result.distance.toFixed(1)} km`;
+                        
+                        item.innerHTML = `
+                            <div class="result-main">${resultName}</div>
+                            <div class="result-details">
+                                <span class="result-address">${result.display_name}</span>
+                                <span class="result-distance">${distanceText}</span>
+                            </div>
+                        `;
+                        
                         item.addEventListener('click', () => {
                             const input = type === 'start' ? startAddressInput : endAddressInput;
                             input.value = result.display_name;
@@ -190,16 +666,18 @@
                 map.removeLayer(startMarker);
             }
             
-            startMarker = L.marker(latlng, { draggable: true }).addTo(map);
-            startMarker.bindPopup("Start").openPopup();
+            startMarker = L.marker(latlng, { 
+                icon: startIcon,
+                draggable: true 
+            }).addTo(map);
             
             startMarker.on('dragend', function() {
                 const newPos = startMarker.getLatLng();
                 reverseGeocode(newPos, startAddressInput);
             });
             
-            map.setView(latlng, 13);
-            instructions.textContent = "Enter destination address.";
+            map.setView(latlng, 15);
+            instructions.textContent = "Enter destination address";
         }
         
         // Set end marker
@@ -208,8 +686,10 @@
                 map.removeLayer(endMarker);
             }
             
-            endMarker = L.marker(latlng, { draggable: true }).addTo(map);
-            endMarker.bindPopup("Destination").openPopup();
+            endMarker = L.marker(latlng, { 
+                icon: endIcon,
+                draggable: true 
+            }).addTo(map);
             
             endMarker.on('dragend', function() {
                 const newPos = endMarker.getLatLng();
@@ -221,10 +701,10 @@
                 const bounds = L.latLngBounds(startMarker.getLatLng(), endMarker.getLatLng());
                 map.fitBounds(bounds, { padding: [50, 50] });
             } else {
-                map.setView(latlng, 13);
+                map.setView(latlng, 15);
             }
             
-            instructions.textContent = "Click 'Calculate Path' to find the shortest route.";
+            instructions.textContent = "Click 'Find Route' to get directions";
         }
         
         // Reverse geocode to get address from coordinates
@@ -267,11 +747,30 @@
             startAddressInput.value = '';
             endAddressInput.value = '';
             calculateBtn.disabled = true;
-            instructions.textContent = "Enter start and destination addresses.";
+            instructions.textContent = "Enter start and destination addresses";
             pathInfo.textContent = "";
+            
+            // Hide route info card
+            routeInfoCard.classList.remove('active');
             
             // Reset view to Joinville
             map.setView([-26.3045, -48.8487], 13);
+        }
+        
+        // Calculate and display ETA
+        function calculateETA(durationSeconds) {
+            const now = new Date();
+            const eta = new Date(now.getTime() + durationSeconds * 1000);
+            
+            let hours = eta.getHours();
+            let minutes = eta.getMinutes();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            
+            hours = hours % 12;
+            hours = hours ? hours : 12;
+            minutes = minutes < 10 ? '0' + minutes : minutes;
+            
+            return `${hours}:${minutes} ${ampm}`;
         }
         
         // Find and display road-based path using OSRM
@@ -284,7 +783,7 @@
             }
             
             // Show loading message
-            pathInfo.textContent = "Calculating route...";
+            pathInfo.textContent = "Calculating best route...";
             
             const start = startMarker.getLatLng();
             const end = endMarker.getLatLng();
@@ -300,7 +799,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
-                        pathInfo.textContent = "Could not find a route between these points.";
+                        pathInfo.textContent = "Could not find a route between these points";
                         return;
                     }
                     
@@ -310,12 +809,25 @@
                     // OSRM returns coordinates as [longitude, latitude], but Leaflet wants [latitude, longitude]
                     const latLngs = coordinates.map(coord => L.latLng(coord[1], coord[0]));
                     
-                    // Display the path
+                    // Display the path with Waze-like styling
                     pathLine = L.polyline(latLngs, {
-                        color: 'blue',
-                        weight: 5,
-                        opacity: 0.7
+                        color: '#33ccff',
+                        weight: 7,
+                        opacity: 0.8,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                        className: 'animated-route'
                     }).addTo(map);
+                    
+                    // Add a border to the path for better visibility
+                    L.polyline(latLngs, {
+                        color: 'white',
+                        weight: 10,
+                        opacity: 0.3,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                        offset: 1
+                    }).addTo(map).bringToBack();
                     
                     // Fit the map to show the whole path
                     const bounds = pathLine.getBounds();
@@ -337,7 +849,13 @@
                     }
                     
                     // Update info
-                    pathInfo.textContent = `Route found! Distance: ${(distance/1000).toFixed(2)} km, Duration: ${durationText}`;
+                    pathInfo.textContent = `Route found!`;
+                    
+                    // Update route info card
+                    routeDistance.textContent = `${(distance/1000).toFixed(1)} km`;
+                    routeDuration.textContent = durationText;
+                    etaTime.textContent = calculateETA(duration);
+                    routeInfoCard.classList.add('active');
                 })
                 .catch(error => {
                     console.error('Error finding route:', error);
